@@ -9,7 +9,7 @@ Build mode: fast
 
 ## Slices
 
-- [ ] **1. App boots and core journey runs end to end**
+- [x] **1. App boots and core journey runs end to end**
   Becomes usable: Login → role selection → project creation → team builder → Kanban workspace, all loading without errors.
   Why now: Proves the scaffold and data layer work before adding agent complexity.
   PRD ref: `prd.md > The Core Journey` (steps 1-4)
