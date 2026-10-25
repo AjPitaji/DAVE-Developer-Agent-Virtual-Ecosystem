@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DAVE — App Map</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; background: #0f172a; color: #e2e8f0; }
+  h1 { color: #38bdf8; } h2 { color: #7dd3fc; }
+  code { background: #1e293b; padding: 2px 6px; border-radius: 4px; font-size: .9em; }
+  .card { background: #1e293b; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  details { margin: .5rem 0; }
+</style>
+</head>
+<body>
+<h1>DAVE — App Map</h1>
+<p>A proof-of-concept agile workflow platform where human teammates work alongside three AI teammates (Michael, Jim, Dwight) on a shared Kanban board, with GitHub integration for branches/PRs and automated code review.</p>
+
+<h2>How a Task Flows Through the System</h2>
+<div class="card">
+  <p><strong>1. Michael</strong> reads the GitHub repo file tree → proposes tasks with real file paths → saved to Supabase <code>tasks</code> table.</p>
+  <p><strong>2. Jim</strong> takes a task → creates a branch + PR via GitHub API → branch name and PR URL stored on the task.</p>
+  <p><strong>3. Dwight</strong> reviews the PR by task display ID → produces structured review report → stored in <code>review_reports</code>.</p>
+  <p><strong>4. Pam</strong> answers "has anyone built this?" → searches public GitHub → returns repos with relevance reasons.</p>
+</div>
+
+<h2>Code Route (2-3 stops)</h2>
+<ol>
+  <li><strong>Entry point:</strong> <code>app/projects/[id]/page.tsx</code> — the main workspace with the Kanban board.</li>
+  <li><strong>AI agents:</strong> <code>lib/agents/michael.ts</code>, <code>lib/agents/jim.ts</code>, <code>lib/agents/dwight.ts</code>, <code>lib/agents/pam.ts</code> — each agent's prompt and logic.</li>
+  <li><strong>GitHub integration:</strong> <code>lib/github/server.ts</code> — server-side GitHub REST API client.</li>
+  <li><strong>Data layer:</strong> <code>lib/supabase/server.ts</code> — Supabase client for data access.</li>
+</ol>
+
+<h2>To Change This, Start Here</h2>
+<ul>
+  <li><strong>Add a new agent:</strong> create a file in <code>lib/agents/</code>, add an API route in <code>app/api/</code>.</li>
+  <li><strong>Change the Kanban stages:</strong> update the stage enum in <code>lib/types/database.ts</code> and the board component.</li>
+  <li><strong>Modify review logic:</strong> edit <code>lib/agents/dwight.ts</code> and <code>app/api/dwight/[projectId]/review/route.ts</code>.</li>
+  <li><strong>Change styling:</strong> edit Tailwind classes in components; theme config in <code>tailwind.config</code>.</li>
+</ul>
+
+<h2>A Practice to Reuse</h2>
+<p><strong>Decision:</strong> Reviewer agent reviews committed code by task display ID instead of running live browser tests.</p>
+<p><strong>Evidence:</strong> <code>devpost/spec.md > What Was Simplified and Why</code> — deferred Playwright to "Later" per scope.</p>
+<p><strong>Practice:</strong> When a full implementation is too complex for a POC, identify the kernel (the idea you're proving) and simplify the expression — mock or simulate the non-essential parts while keeping the core behavior real. Label simulations clearly.</p>
+
+<h2>How to Run Again</h2>
+<p><code>npm run dev</code> → open <code>http://localhost:3000</code>. Requires <code>.env.local</code> with Supabase, OpenAI, and GitHub token keys.</p>
+<p><em>Snapshot — code may drift after further changes.</em></p>
+</body>
+</html>
