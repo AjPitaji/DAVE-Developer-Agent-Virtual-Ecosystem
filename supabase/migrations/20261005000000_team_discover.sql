@@ -1,0 +1,23 @@
+-- ============================================================================
+-- SUPERSEDED - DO NOT RUN THIS FILE
+-- ============================================================================
+--
+-- This combined migration was replaced by two separate files because
+-- Supabase's SQL Editor silently drops `do $$ ... $$` blocks on paste, which
+-- left the join_request_status enum type uncreated and broke every function
+-- referencing it (ERROR 42704).
+--
+-- Run these two files instead, in this order:
+--
+--   1. 20261005000001_part1_schema_policies.sql
+--   2. 20261005000002_part2_rpcs.sql
+--
+-- Part 1 is schema + policies and contains no function bodies, so it runs
+-- cleanly as a single batch. Part 2 holds the four security-definer RPCs and
+-- must be pasted as a separate run.
+--
+-- Related: 20261006000000_profiles_email.sql (profiles.email / .role backfill
+-- plus the profile_by_email RPC).
+-- ============================================================================
+
+select 'superseded: see 20261005000001_part1_schema_policies.sql and 20261005000002_part2_rpcs.sql';

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DAVE — Technical Spec</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 2rem; background: #0f172a; color: #e2e8f0; }
+  h1 { color: #38bdf8; } h2 { color: #7dd3fc; border-bottom: 1px solid #334155; padding-bottom: .5rem; }
+  h3 { color: #a5f3fc; }
+  code { background: #1e293b; padding: 2px 6px; border-radius: 4px; font-size: .9em; }
+  pre { background: #1e293b; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+  .card { background: #1e293b; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  .mermaid { background: #1e293b; padding: 1rem; border-radius: 8px; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+<h1>DAVE — Technical Spec</h1>
+<p>Status: draft</p>
+
+<h2>How This Works, In Plain Language</h2>
+<p>DAVE is a Next.js web app. The browser shows pages rendered by React. When data needs to be saved or AI agents need to run, the browser calls Next.js API routes. Those routes talk to Supabase (hosted Postgres) for storage and to OpenAI for AI reasoning. GitHub integration happens server-side via the GitHub REST API. The reviewer agent (Dwight) reviews committed code from a linked PR. Everything runs locally with <code>npm run dev</code>.</p>
+
+<h2>Core Journey Through the System</h2>
+<div class="mermaid">
+graph TD
+  A[Login] --> B[Role Selection]
+  B --> C[Project Setup]
+  C --> D[Team Builder]
+  D --> E[Kanban Workspace]
+  E --> F[Michael plans tasks from GitHub repo]
+  F --> G[Jim creates branch + PR]
+  G --> H[Task moves to Done]
+  H --> I[Dwight reviews PR code]
+  I --> J[Review Report View]
+  E --> K[Pam searches public GitHub]
+</div>
+
+<h2>Stack</h2>
+<div class="card">
+Next.js 16 · React 19 · TypeScript 5 · Tailwind 4 · Supabase · OpenAI · GitHub REST API · Radix UI · Zustand · @hello-pangea/dnd · cheerio · lucide-react
+</div>
+
+<h2>Where It Runs</h2>
+<p>Local: <code>npm run dev</code> → browser at <code>http://localhost:3000</code>. Requires <code>.env.local</code> with Supabase, OpenAI, and GitHub token keys. Demo recorded from browser. No deployment for POC.</p>
+
+<h2>Components</h2>
+<ul>
+<li><strong>Auth</strong> — Login/role selection via Supabase Auth</li>
+<li><strong>Project Setup</strong> — Form for project details + GitHub repo URL</li>
+<li><strong>Team Builder</strong> — Human teammates + auto-seeded AI teammates</li>
+<li><strong>Kanban Board</strong> — 4 columns, drag-and-drop</li>
+<li><strong>Michael</strong> — AI task planner reading GitHub repo file tree</li>
+<li><strong>Jim</strong> — AI developer creating branches + PRs</li>
+<li><strong>Dwight</strong> — Reviewer agent reviewing committed PR code</li>
+<li><strong>Pam</strong> — Prior art search over public GitHub</li>
+</ul>
+
+<h2>Data Model</h2>
+<p>Supabase tables: <code>projects</code>, <code>team_members</code>, <code>tasks</code>, <code>review_reports</code>. Tasks are source of truth. Zustand holds transient UI state.</p>
+
+<h2>External Services</h2>
+<ul>
+<li>Supabase — Auth + Postgres (free tier)</li>
+<li>OpenAI API — Agent reasoning (gpt-4o-mini)</li>
+<li>GitHub REST API — Repo tree, branches, PRs, search (PAT auth, 5000 req/hr)</li>
+</ul>
+
+<h2>Important Failure Modes</h2>
+<ul>
+<li>GitHub token missing → agent features fail gracefully, rest works</li>
+<li>OpenAI unavailable → agent endpoints error, UI shows "unavailable"</li>
+<li>Supabase down → app shows error, no data loads</li>
+<li>Empty/unreadable repo → Michael reports honestly, no invented files</li>
+</ul>
+
+<h2>What Was Simplified</h2>
+<ul>
+<li>Reviewer reviews committed code (not live Playwright)</li>
+<li>GitHub uses PAT (not full OAuth)</li>
+<li>Single-user demo (no real-time multi-user)</li>
+<li>Reviewer results may be seeded/simulated where real execution isn't feasible</li>
+</ul>
+
+<script>mermaid.initialize({theme:'dark'});</script>
+</body>
+</html>

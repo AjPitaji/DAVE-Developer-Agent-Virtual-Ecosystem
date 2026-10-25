@@ -1,0 +1,1486 @@
+'use client'
+
+import { useEffect, useState, ReactNode } from 'react'
+import { useRouter, useParams } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import { ArrowLeft, Loader2, Plus, MoreVertical, Trash2, CheckCircle2, Users, Bot, ChevronRight, GripVertical, ExternalLink, CalendarClock, Play, Sparkles, AlertCircle, Lock, Bot as BotIcon, LayoutDashboard, Briefcase } from 'lucide-react'
+import GithubIcon from '@/components/GithubIcon'
+import Link from 'next/link'
+import { JimPanel } from '@/components/JimPanel'
+import { MichaelPanel } from '@/components/MichaelPanel'
+
+interface Project {
+  id: string
+  name: string
+  description: string | null
+  max_open_tasks: number
+  // Mirrors the public.project_status enum exactly so TS catches mismatches
+  // (the page used to claim 'paused' | 'completed' which the enum never had).
+  status: 'active' | 'draft' | 'archived' | 'on_hold'
+  team_id: string
+  owner_id: string
+  repo_url: string | null
+  deadline: string | null
+  started_at: string | null
+  teams: {
+    name: string
+  }
+  profiles: {
+    name: string
+    github_username: string | null
+  } | null
+}
+
+interface StartReadiness {
+  has_deadline: boolean
+  deadline_passed: boolean
+  total_tasks: number
+  unassigned_tasks: number
+  members_total: number
+  members_with_task: number
+  is_owner: boolean
+  can_start: boolean
+}
+
+interface Board {
+  id: string
+  name: string
+  type: 'kanban' | 'scrum'
+}
+
+interface Column {
+  id: string
+  board_id: string
+  name: string
+  position: number
+}
+
+interface Task {
+  id: string
+  title: string
+  description: string | null
+  status: string
+  priority: 'low' | 'medium' | 'high' | 'urgent'
+  assignee_id: string | null
+  created_by: string
+  column_id: string
+  position: number
+  profiles?: {
+    name: string
+    avatar_url: string | null
+  }
+}
+
+const priorityColors = {
+  low: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+  medium: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  high: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  urgent: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+}
+
+export default function ProjectDetailPage() {
+  const router = useRouter()
+  const params = useParams()
+  const projectId = params.id as string
+  const supabase = createClient()
+
+  const [project, setProject] = useState<Project | null>(null)
+  const [board, setBoard] = useState<Board | null>(null)
+  const [columns, setColumns] = useState<Column[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [currentUserId, setCurrentUserId] = useState<string>('')
+
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  // Drag and Drop State
+  const [draggedTask, setDraggedTask] = useState<Task | null>(null)
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
+
+  // New Task/Issue Modal State
+  const [showNewTaskModal, setShowNewTaskModal] = useState(false)
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newTaskDescription, setNewTaskDescription] = useState('')
+  const [newTaskPriority, setNewTaskPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium')
+  const [selectedAssignee, setSelectedAssignee] = useState<string>('')
+  const [projectMembers, setProjectMembers] = useState<{ user_id: string; profiles: { name: string } }[]>([])
+  const [submitting, setSubmitting] = useState(false)
+
+  // Create GitHub Repo Modal State
+  const [showCreateRepoModal, setShowCreateRepoModal] = useState(false)
+  const [repoName, setRepoName] = useState('')
+  const [repoDescription, setRepoDescription] = useState('')
+  const [repoPrivate, setRepoPrivate] = useState(true)
+  const [creatingRepo, setCreatingRepo] = useState(false)
+  const [repoError, setRepoError] = useState<ReactNode>('')
+
+  // Jim Panel State
+  const [activeTab, setActiveTab] = useState<'board' | 'jim' | 'michael'>('board')
+
+  // Planning / start flow state
+  const [readiness, setReadiness] = useState<StartReadiness | null>(null)
+  const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState('')
+  const [editingDeadline, setEditingDeadline] = useState(false)
+  const [deadlineDraft, setDeadlineDraft] = useState('')
+  const [savingDeadline, setSavingDeadline] = useState(false)
+
+  useEffect(() => {
+    loadProjectData()
+  }, [projectId])
+
+  // Reload the start-readiness snapshot whenever tasks change so the banner
+  // reflects the current unassigned / member state without a full refresh.
+  // We derive `showReadinessBanner` in render instead of clearing state in
+  // this effect — that keeps setState out of the effect body (avoids a
+  // cascading-render warning) and means the readiness just isn't displayed
+  // once the project leaves draft.
+  useEffect(() => {
+    if (project?.status === 'draft' && project?.id) {
+      loadReadiness()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.status, project?.id, tasks.length, projectMembers.length])
+
+  async function loadReadiness() {
+    try {
+      const { data, error } = await supabase
+        .rpc('project_start_readiness', { p_project_id: projectId })
+        .single()
+      if (error) {
+        // Don't toast — the banner just won't show. Most likely cause is the
+        // RPC not existing on a stale DB; the rest of the page still works.
+        console.warn('project_start_readiness failed:', error)
+        return
+      }
+      setReadiness(data as StartReadiness)
+    } catch (err) {
+      console.warn('project_start_readiness threw:', err)
+    }
+  }
+
+  async function handleStartProject() {
+    if (!project) return
+    setStarting(true)
+    setStartError('')
+    try {
+      const { data, error } = await supabase
+        .rpc('start_project', { p_project_id: project.id })
+        .single()
+      if (error) throw error
+      // Refresh local state from the row the RPC returned.
+      setProject((prev) =>
+        prev ? { ...prev, status: 'active', started_at: data.started_at } : prev
+      )
+      setReadiness(null)
+    } catch (err: any) {
+      setStartError(err.message || 'Failed to start project')
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  function beginEditDeadline() {
+    if (!project) return
+    // Pre-fill the date input from either the existing deadline or today.
+    const seed = project.deadline
+      ? new Date(project.deadline)
+      : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // default: 1 week out
+    setDeadlineDraft(seed.toISOString().slice(0, 10))
+    setEditingDeadline(true)
+  }
+
+  async function saveDeadline() {
+    if (!project) return
+    if (!deadlineDraft) {
+      setStartError('Please pick a deadline date.')
+      return
+    }
+    setSavingDeadline(true)
+    setStartError('')
+    try {
+      const iso = new Date(`${deadlineDraft}T23:59:59`).toISOString()
+      const { data, error } = await supabase
+        .rpc('set_project_deadline', {
+          p_project_id: project.id,
+          p_deadline: iso,
+        })
+        .single()
+      if (error) throw error
+      setProject((prev) => (prev ? { ...prev, deadline: data.deadline } : prev))
+      setEditingDeadline(false)
+      loadReadiness()
+    } catch (err: any) {
+      setStartError(err.message || 'Failed to save deadline')
+    } finally {
+      setSavingDeadline(false)
+    }
+  }
+
+  const handleDescriptionUpdate = async (newDescription: string) => {
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .update({ description: newDescription })
+        .eq('id', projectId)
+
+      if (error) throw error
+      setProject(prev => prev ? { ...prev, description: newDescription } : prev)
+    } catch (err) {
+      console.error('Failed to update description:', err)
+    }
+  }
+
+  const handleTitleUpdate = async (newName: string) => {
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .update({ name: newName })
+        .eq('id', projectId)
+
+      if (error) throw error
+      setProject(prev => prev ? { ...prev, name: newName } : prev)
+    } catch (err) {
+      console.error('Failed to update project name:', err)
+    }
+  }
+
+  async function loadProjectData() {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        router.push('/login')
+        return
+      }
+
+      setCurrentUserId(user.id)
+
+      // 1. Load Project
+      const { data: projectData, error: projectError } = await supabase
+        .from('projects')
+        .select(`
+          id,
+          name,
+          description,
+          max_open_tasks,
+          status,
+          team_id,
+          owner_id,
+          repo_url,
+          deadline,
+          started_at,
+          teams (
+            name
+          )
+        `)
+        .eq('id', projectId)
+        .single()
+
+      if (projectError) throw projectError
+
+      // Fetch owner profile separately to avoid PostgREST relationship ambiguity
+      let ownerProfile: { name: string; github_username: string | null } | null = null
+      if (projectData?.owner_id) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('name, github_username')
+          .eq('id', projectData.owner_id)
+          .single()
+        ownerProfile = profileData as { name: string; github_username: string | null } | null
+      }
+
+      const enrichedProject = {
+        ...(projectData as unknown as Omit<Project, 'profiles'>),
+        profiles: ownerProfile,
+      }
+      setProject(enrichedProject as unknown as Project)
+
+      // 1b. Load Team Members (for task assignment dropdown)
+      // Use team_members so all team devs are assignable, not just those already in project_members
+      const projectTeamId = projectData?.team_id
+      if (projectTeamId) {
+        const { data: membersData, error: membersError } = await supabase
+          .from('team_members')
+          .select('user_id')
+          .eq('team_id', projectTeamId)
+
+        if (!membersError && membersData) {
+          const userIds = membersData.map((m: { user_id: string }) => m.user_id)
+          let profilesMap: Record<string, { name: string }> = {}
+          if (userIds.length > 0) {
+            const { data: profilesData } = await supabase
+              .from('profiles')
+              .select('id, name')
+              .in('id', userIds)
+            profilesMap = Object.fromEntries(
+              (profilesData || []).map((p: { id: string; name: string }) => [p.id, { name: p.name }])
+            )
+          }
+          setProjectMembers(
+            membersData.map((m: { user_id: string }) => ({
+              user_id: m.user_id,
+              profiles: profilesMap[m.user_id] || { name: 'Unknown' }
+            }))
+          )
+        }
+      }
+
+      // 2. Load Board (created by handle_new_board trigger at project creation)
+      const { data: boardData, error: boardError } = await supabase
+        .from('boards')
+        .select('id, name, type')
+        .eq('project_id', projectId)
+        .single()
+
+      if (boardError) {
+        // Only "no rows returned" justifies creating a board. Any other error
+        // (RLS violation, network failure) must surface as-is: blindly trying
+        // to INSERT used to mask a permissions problem as a misleading
+        // "new row violates row-level security policy for table boards".
+        const isMissingRow =
+          boardError.code === 'PGRST116' ||
+          boardError.code === 'PGRST301' ||
+          /returned no rows/i.test(boardError.message || '')
+
+        if (!isMissingRow) {
+          throw boardError
+        }
+
+        const { data: newBoard, error: createError } = await supabase
+          .from('boards')
+          .insert({
+            project_id: projectId,
+            name: 'Sprint Board',
+            type: 'kanban',
+          })
+          .select()
+          .single()
+
+        if (createError) throw createError
+        setBoard(newBoard)
+      } else {
+        setBoard(boardData)
+      }
+
+      // 3. Load Columns (should exist via trigger)
+      const boardIdToUse = boardData?.id || board?.id
+      if (boardIdToUse) {
+        const { data: columnsData, error: columnsError } = await supabase
+          .from('columns')
+          .select('*')
+          .eq('board_id', boardIdToUse)
+          .order('position')
+
+        if (columnsError) throw columnsError
+        setColumns(columnsData || [])
+
+        // 4. Load Tasks (tasks belong to columns, not directly to projects)
+        const columnIds = (columnsData as { id: string }[] | null)?.map((c: { id: string }) => c.id) || []
+
+        if (columnIds.length > 0) {
+          const { data: tasksData, error: tasksError } = await supabase
+            .from('tasks')
+            .select(`
+              id,
+              title,
+              description,
+              status,
+              priority,
+              assignee_id,
+              created_by,
+              column_id,
+              position
+            `)
+            .in('column_id', columnIds)
+            .order('position')
+
+          if (tasksError) throw tasksError
+
+          // Manually fetch profiles for assigned users
+          const userIds =
+            (tasksData as { assignee_id: string | null }[] | null)
+              ?.map((t: { assignee_id: string | null }) => t.assignee_id)
+              .filter(Boolean) || []
+          const uniqueUserIds = [...new Set(userIds)]
+
+          let profilesMap: Record<string, { name: string; avatar_url: string | null }> = {}
+          if (uniqueUserIds.length > 0) {
+            const { data: profilesData } = await supabase
+              .from('profiles')
+              .select('id, name, avatar_url')
+              .in('id', uniqueUserIds)
+
+            profilesMap = Object.fromEntries(
+              ((profilesData || []) as { id: string; name: string; avatar_url: string | null }[]).map(
+                (p: { id: string; name: string; avatar_url: string | null }) => [
+                  p.id,
+                  { name: p.name, avatar_url: p.avatar_url },
+                ]
+              )
+            )
+          }
+
+          // Merge profiles into tasks
+          const enrichedTasks = ((tasksData || []) as (Task & { assignee_id: string | null })[]).map(
+            (task: Task & { assignee_id: string | null }) => ({
+              ...task,
+              profiles: task.assignee_id ? profilesMap[task.assignee_id] : undefined,
+            })
+          )
+
+          setTasks(enrichedTasks as unknown as Task[])
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load project data')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const openNewTaskModal = () => {
+    setNewTaskTitle('')
+    setNewTaskDescription('')
+    setNewTaskPriority('medium')
+    setSelectedAssignee('')
+    setShowNewTaskModal(true)
+  }
+
+  const handleCreateTask = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitting(true)
+
+    try {
+      if (!currentUserId) throw new Error('Not authenticated')
+
+      // Find the first column (default: To Do)
+      const toDoColumn = columns.find((c) => c.position === 0) || columns[0]
+      if (!toDoColumn) throw new Error('No columns found')
+
+      // Calculate next position in the To Do column
+      const tasksInColumn = tasks.filter((t) => t.column_id === toDoColumn.id)
+      const nextPosition = tasksInColumn.length
+
+      const { data: newTask, error: taskError } = await supabase
+        .from('tasks')
+        .insert({
+          column_id: toDoColumn.id,
+          title: newTaskTitle,
+          description: newTaskDescription || null,
+          status: 'todo',
+          priority: newTaskPriority,
+          assignee_id: selectedAssignee || null,
+          created_by: currentUserId,
+          position: nextPosition,
+        })
+        .select()
+        .single()
+
+      if (taskError) throw taskError
+
+      // Fetch the assignee's profile if assigned
+      let profile = null
+      if (selectedAssignee) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('name, avatar_url')
+          .eq('id', selectedAssignee)
+          .single()
+        profile = profileData
+      }
+
+      const enrichedTask = {
+        ...newTask,
+        profiles: profile || undefined,
+      }
+
+      setTasks((prev) => [...prev, enrichedTask as unknown as Task])
+      setShowNewTaskModal(false)
+    } catch (err: any) {
+      alert(err.message || 'Failed to create issue')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleMoveTask = async (taskId: string, targetColumnId: string) => {
+    try {
+      const targetColumn = columns.find((c) => c.id === targetColumnId)
+      if (!targetColumn) return
+
+      // Determine appropriate status based on target column name
+      let newStatus = 'todo'
+      const colName = targetColumn.name.toLowerCase()
+      if (colName.includes('done') || colName.includes('closed') || colName.includes('complete')) {
+        newStatus = 'done'
+      } else if (colName.includes('progress') || colName.includes('review') || colName.includes('testing')) {
+        newStatus = 'in_progress'
+      } else if (colName.includes('block')) {
+        newStatus = 'blocked'
+      }
+
+      // Optimistic update
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId ? { ...t, column_id: targetColumnId, status: newStatus } : t
+        )
+      )
+
+      const { error } = await supabase
+        .from('tasks')
+        .update({
+          column_id: targetColumnId,
+          status: newStatus,
+        })
+        .eq('id', taskId)
+
+      if (error) {
+        // Revert on error
+        loadProjectData()
+        throw error
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to move task')
+    }
+  }
+
+  const handleDragStart = (e: React.DragEvent, task: Task) => {
+    // Block drag-to-move for non-owners while the project is in draft.
+    if (!canEditTasks) {
+      e.preventDefault()
+      return
+    }
+    setDraggedTask(task)
+    e.dataTransfer.setData('text/plain', task.id)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e: React.DragEvent, columnId: string) => {
+    if (!canEditTasks) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverColumn !== columnId) {
+      setDragOverColumn(columnId)
+    }
+  }
+
+  const handleDragLeave = (columnId: string) => {
+    if (dragOverColumn === columnId) {
+      setDragOverColumn(null)
+    }
+  }
+
+  const handleDrop = async (e: React.DragEvent, targetColumnId: string) => {
+    e.preventDefault()
+    setDragOverColumn(null)
+    if (!canEditTasks) {
+      setDraggedTask(null)
+      return
+    }
+    if (!draggedTask || draggedTask.column_id === targetColumnId) {
+      setDraggedTask(null)
+      return
+    }
+
+    await handleMoveTask(draggedTask.id, targetColumnId)
+    setDraggedTask(null)
+  }
+
+  const handleDeleteTask = async (taskId: string) => {
+    if (!confirm('Delete this task?')) return
+
+    try {
+      const { error } = await supabase.from('tasks').delete().eq('id', taskId)
+
+      if (error) throw error
+
+      setTasks((prev) => prev.filter((t) => t.id !== taskId))
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete task')
+    }
+  }
+
+  const handleCreateRepo = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitting(true)
+    setRepoError('')
+
+    try {
+      if (!currentUserId) throw new Error('Not authenticated')
+      if (!project) throw new Error('Project not loaded')
+
+      const res = await fetch(`/api/projects/${projectId}/github/create-repo`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: repoName.trim() || project.name,
+          description: repoDescription.trim() || project.description || '',
+          private: repoPrivate,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        if (data.code === 'GITHUB_NOT_CONNECTED' || data.code === 'GITHUB_TOKEN_INVALID') {
+          setRepoError(
+            <>
+              {data.error}{' '}
+              <a
+                href="/settings"
+                className="font-semibold underline decoration-purple-500 hover:text-purple-600 dark:text-purple-400"
+              >
+                Go to Settings to reconnect
+              </a>
+              .
+            </>
+          )
+        } else if (data.code === 'GITHUB_RATE_LIMIT') {
+          setRepoError(data.error)
+        } else if (data.code === 'REPO_NAME_TAKEN' || data.code === 'GITHUB_VALIDATION_FAILED') {
+          // Surface GitHub's field-level message inline so the user knows
+          // exactly what to change (e.g. "name already exists on this account").
+          setRepoError(data.error || 'GitHub rejected the repository details.')
+        } else {
+          throw new Error(data.error || 'Failed to create GitHub repo')
+        }
+        return
+      }
+
+      setProject((prev) => {
+        if (!prev) return prev
+        return { ...prev, repo_url: data.repo_url }
+      })
+      setShowCreateRepoModal(false)
+    } catch (err: any) {
+      setRepoError(err.message || 'Failed to create GitHub repo')
+    } finally {
+      setCreatingRepo(false)
+    }
+  }
+
+  const handleCompleteTask = async (taskId: string) => {
+    try {
+      const doneColumn = columns.find((c) => c.name.toLowerCase().includes('done'))
+      if (!doneColumn) {
+        alert('No "Done" column found')
+        return
+      }
+
+      const { error } = await supabase
+        .from('tasks')
+        .update({
+          status: 'done',
+          column_id: doneColumn.id,
+        })
+        .eq('id', taskId)
+
+      if (error) throw error
+
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId ? { ...t, status: 'done', column_id: doneColumn.id } : t
+        )
+      )
+    } catch (err: any) {
+      alert(err.message || 'Failed to complete task')
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 dark:from-gray-900 dark:via-purple-900/20 dark:to-blue-900/20 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
+      </div>
+    )
+  }
+
+  if (error || !project) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 dark:from-gray-900 dark:via-purple-900/20 dark:to-blue-900/20 flex items-center justify-center p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 max-w-md text-center">
+          <p className="text-red-600 dark:text-red-400 mb-4">{error || 'Project not found'}</p>
+          <Link
+            href="/dashboard"
+            className="text-purple-600 dark:text-purple-400 hover:underline"
+          >
+            Back to Dashboard
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  const openTasksCount = tasks.filter((t) => t.status !== 'done').length
+  const capacityRemaining = project.max_open_tasks - openTasksCount
+  const capacityPercent = (openTasksCount / project.max_open_tasks) * 100
+
+  const isProjectOwner = project.owner_id === currentUserId
+  const isDraft = project.status === 'draft'
+  // While in draft, only the owner can create or move tasks. Everyone else
+  // gets a read-only view of the board (per design choice: "read-only board
+  // for devs while in planning").
+  const canEditTasks = isProjectOwner || !isDraft
+
+  // Days remaining until the deadline (negative = overdue). Null when no
+  // deadline is set.
+  const deadlineDate = project.deadline ? new Date(project.deadline) : null
+  const daysUntilDeadline = deadlineDate
+    ? Math.ceil((deadlineDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : null
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 dark:from-gray-900 dark:via-purple-900/20 dark:to-blue-900/20 p-4">
+      <div className="max-w-7xl mx-auto pt-6 pb-16">
+        {/* Header */}
+        <div className="mb-6">
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 mb-4 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Dashboard
+          </Link>
+
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-100 dark:border-gray-700">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-2 flex-wrap">
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+                    {project.name}
+                  </h1>
+                  <span
+                    className={`inline-block px-3 py-1 rounded-full text-xs font-semibold capitalize ${
+                      project.status === 'active'
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                        : project.status === 'draft'
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                        : project.status === 'on_hold'
+                        ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                        : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    {project.status === 'on_hold' ? 'On Hold' : project.status}
+                  </span>
+                  {deadlineDate && (
+                    <span
+                      title={deadlineDate.toLocaleString()}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
+                        daysUntilDeadline !== null && daysUntilDeadline < 0
+                          ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800'
+                          : daysUntilDeadline !== null && daysUntilDeadline <= 3
+                          ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800'
+                          : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800'
+                      }`}
+                    >
+                      <CalendarClock className="w-3.5 h-3.5" />
+                      {daysUntilDeadline !== null && daysUntilDeadline < 0
+                        ? `Overdue by ${Math.abs(daysUntilDeadline)}d`
+                        : daysUntilDeadline === 0
+                        ? 'Due today'
+                        : daysUntilDeadline === 1
+                        ? 'Due tomorrow'
+                        : `${daysUntilDeadline}d to deadline`}
+                    </span>
+                  )}
+                </div>
+                <p className="text-gray-600 dark:text-gray-400 text-sm mb-1">
+                  Team: {project.teams.name}
+                  {project.profiles?.name && (
+                    <>
+                      {' · '}
+                      Owned by{' '}
+                      {project.profiles.github_username ? (
+                        <a
+                          href={`https://github.com/${project.profiles.github_username}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 font-medium text-purple-600 dark:text-purple-400 hover:underline"
+                        >
+                          <GithubIcon className="w-3.5 h-3.5" />
+                          @{project.profiles.github_username}
+                        </a>
+                      ) : (
+                        <span className="font-medium">{project.profiles.name}</span>
+                      )}
+                    </>
+                  )}
+                </p>
+                {project.description && (
+                  <p className="text-gray-600 dark:text-gray-400 text-sm">
+                    {project.description}
+                  </p>
+                )}
+                {project.repo_url && (
+                  <a
+                    href={project.repo_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 mt-3 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl transition-colors"
+                  >
+                    <GithubIcon className="w-4 h-4" />
+                    <span className="max-w-[22rem] truncate">
+                      {project.repo_url.replace(/^https?:\/\/(www\.)?github\.com\//, '')}
+                    </span>
+                    <ExternalLink className="w-3 h-3 opacity-60" />
+                  </a>
+                )}
+                {!project.repo_url && (
+                  <button
+                    onClick={() => {
+                      setRepoName(project.name)
+                      setRepoDescription(project.description || '')
+                      setRepoPrivate(true)
+                      setRepoError('')
+                      setShowCreateRepoModal(true)
+                    }}
+                    className="inline-flex items-center gap-2 mt-3 px-3 py-1.5 text-xs font-semibold text-white bg-gray-900 dark:bg-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 rounded-xl transition-colors"
+                  >
+                    <GithubIcon className="w-4 h-4" />
+                    Create GitHub Repo
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={openNewTaskModal}
+                disabled={capacityRemaining <= 0 || !canEditTasks}
+                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold rounded-xl shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                title={
+                  !canEditTasks
+                    ? 'Read-only while the project is in planning — only the owner can plan tasks'
+                    : capacityRemaining <= 0
+                    ? 'At capacity — complete or remove tasks first'
+                    : 'Create new issue'
+                }
+              >
+                {!canEditTasks ? (
+                  <Lock className="w-5 h-5" />
+                ) : (
+                  <Plus className="w-5 h-5" />
+                )}
+                {canEditTasks ? 'Create Issue' : 'Read-only'}
+              </button>
+            </div>
+
+            {/* Capacity Bar */}
+            <div className="mt-4">
+              <div className="flex items-center justify-between text-sm mb-2">
+                <span className="text-gray-700 dark:text-gray-300 font-medium">
+                  WIP Capacity
+                </span>
+                <span
+                  className={`font-bold ${
+                    capacityRemaining > 0
+                      ? 'text-green-600 dark:text-green-400'
+                      : 'text-red-600 dark:text-red-400'
+                  }`}
+                >
+                  {openTasksCount} / {project.max_open_tasks} open tasks
+                  {capacityRemaining > 0
+                    ? ` (${capacityRemaining} remaining)`
+                    : ' (at capacity!)'}
+                </span>
+              </div>
+              <div className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    capacityPercent > 90
+                      ? 'bg-red-500'
+                      : capacityPercent > 70
+                      ? 'bg-amber-500'
+                      : 'bg-green-500'
+                  }`}
+                  style={{ width: `${Math.min(capacityPercent, 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Planning banner — only renders while the project is in draft */}
+        {isDraft && (
+          <div
+            className={`rounded-2xl border p-5 mb-6 ${
+              readiness?.can_start
+                ? 'bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border-emerald-200 dark:border-emerald-800'
+                : 'bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border-amber-200 dark:border-amber-800'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="flex-1 min-w-[260px]">
+                <div className="flex items-center gap-2 mb-1">
+                  {readiness?.can_start ? (
+                    <Sparkles className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                  )}
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+                    {readiness?.can_start
+                      ? 'Ready to start — every task is assigned'
+                      : 'Planning mode'}
+                  </h2>
+                </div>
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  {isProjectOwner
+                    ? 'Assign tasks to your team, set a deadline, then click Start Project to flip the board live.'
+                    : 'Your team owner is still planning. The board below is read-only until the project goes live — assigned tasks will show up on your dashboard when it starts.'}
+                </p>
+
+                {/* Checklist the owner can tick off in their head */}
+                {isProjectOwner && readiness && (
+                  <ul className="mt-3 space-y-1.5 text-sm">
+                    <li className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex w-4 h-4 rounded-full items-center justify-center text-[10px] font-bold ${
+                          readiness.has_deadline
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
+                        }`}
+                      >
+                        {readiness.has_deadline ? '✓' : '•'}
+                      </span>
+                      <span className={readiness.has_deadline ? 'text-gray-500 line-through' : 'text-gray-700 dark:text-gray-300'}>
+                        Set a deadline
+                      </span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex w-4 h-4 rounded-full items-center justify-center text-[10px] font-bold ${
+                          readiness.total_tasks > 0
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
+                        }`}
+                      >
+                        {readiness.total_tasks > 0 ? '✓' : '•'}
+                      </span>
+                      <span className={readiness.total_tasks > 0 ? 'text-gray-500 line-through' : 'text-gray-700 dark:text-gray-300'}>
+                        Create at least one task
+                      </span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex w-4 h-4 rounded-full items-center justify-center text-[10px] font-bold ${
+                          readiness.unassigned_tasks === 0 && readiness.total_tasks > 0
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
+                        }`}
+                      >
+                        {readiness.unassigned_tasks === 0 && readiness.total_tasks > 0 ? '✓' : '•'}
+                      </span>
+                      <span className={readiness.unassigned_tasks === 0 && readiness.total_tasks > 0 ? 'text-gray-500 line-through' : 'text-gray-700 dark:text-gray-300'}>
+                        Assign every task
+                        {readiness.unassigned_tasks > 0 && (
+                          <span className="text-amber-700 dark:text-amber-300">
+                            {' '}— {readiness.unassigned_tasks} left
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  </ul>
+                )}
+
+                {startError && (
+                  <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+                    {startError}
+                  </p>
+                )}
+              </div>
+
+              {/* Right column: deadline editor + Start button (owner only) */}
+              {isProjectOwner && (
+                <div className="flex flex-col items-stretch gap-2 min-w-[220px]">
+                  {editingDeadline ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={deadlineDraft}
+                        min={new Date().toISOString().slice(0, 10)}
+                        onChange={(e) => setDeadlineDraft(e.target.value)}
+                        className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                      />
+                      <button
+                        onClick={saveDeadline}
+                        disabled={savingDeadline}
+                        className="px-3 py-2 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg disabled:opacity-50"
+                      >
+                        {savingDeadline ? '...' : 'Save'}
+                      </button>
+                      <button
+                        onClick={() => setEditingDeadline(false)}
+                        className="px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={beginEditDeadline}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg"
+                    >
+                      <CalendarClock className="w-4 h-4" />
+                      {project.deadline ? 'Change deadline' : 'Set deadline'}
+                    </button>
+                  )}
+
+                  <button
+                    onClick={handleStartProject}
+                    disabled={!readiness?.can_start || starting}
+                    className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold rounded-lg shadow-md transition-all disabled:cursor-not-allowed ${
+                      readiness?.can_start
+                        ? 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                    }`}
+                    title={
+                      !readiness?.can_start
+                        ? 'Resolve the checklist above before starting'
+                        : 'Flip this project from Planning to Active'
+                    }
+                  >
+                    {starting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Play className="w-4 h-4" />
+                    )}
+                    {starting ? 'Starting...' : 'Start Project'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab Navigation */}
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => setActiveTab('board')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+              activeTab === 'board'
+                ? 'bg-purple-500 text-white shadow-lg'
+                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700'
+            }`}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            Board
+          </button>
+          <button
+            onClick={() => setActiveTab('jim')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+              activeTab === 'jim'
+                ? 'bg-purple-500 text-white shadow-lg'
+                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700'
+            }`}
+          >
+            <BotIcon className="w-4 h-4" />
+            Jim
+          </button>
+          <button
+            onClick={() => setActiveTab('michael')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+              activeTab === 'michael'
+                ? 'bg-amber-500 text-white shadow-lg'
+                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700'
+            }`}
+          >
+            <Briefcase className="w-4 h-4" />
+            Michael
+          </button>
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 'board' && (
+          <>
+            {/* Kanban Board */}
+            <div className="flex gap-4 overflow-x-auto pb-4">
+              {columns.map((column, colIdx) => {
+                const columnTasks = tasks.filter((t) => t.column_id === column.id)
+                const isDragOver = dragOverColumn === column.id
+                const nextColumn = columns[colIdx + 1]
+
+                return (
+                  <div
+                    key={column.id}
+                    onDragOver={(e) => handleDragOver(e, column.id)}
+                    onDragLeave={() => handleDragLeave(column.id)}
+                    onDrop={(e) => handleDrop(e, column.id)}
+                    className={`flex-shrink-0 w-80 bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-4 border transition-all ${
+                      isDragOver
+                        ? 'border-purple-500 ring-2 ring-purple-500/20 bg-purple-50/20 dark:bg-purple-950/20'
+                        : 'border-gray-100 dark:border-gray-700'
+                    }`}
+                  >
+                    {/* Column Header */}
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        {column.name}
+                        <span className="text-sm font-normal text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-full">
+                          {columnTasks.length}
+                        </span>
+                      </h3>
+                    </div>
+
+                    {/* Tasks */}
+                    <div className="space-y-3 min-h-[200px]">
+                      {columnTasks.map((task) => (
+                        <div
+                          key={task.id}
+                          draggable={canEditTasks}
+                          onDragStart={(e) => handleDragStart(e, task)}
+                          className={`bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 border border-gray-200 dark:border-gray-600 hover:shadow-md transition-all group ${
+                            canEditTasks ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center gap-1 flex-1">
+                              <GripVertical
+                                className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-opacity ${
+                                  canEditTasks ? 'opacity-0 group-hover:opacity-100' : 'opacity-30'
+                                }`}
+                              />
+                              <h4 className="text-sm font-semibold text-gray-900 dark:text-white leading-tight">
+                                {task.title}
+                              </h4>
+                            </div>
+                            {canEditTasks && (
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                {nextColumn && (
+                                  <button
+                                    onClick={() => handleMoveTask(task.id, nextColumn.id)}
+                                    className="p-1 rounded hover:bg-purple-100 dark:hover:bg-purple-900/30 text-purple-600 dark:text-purple-400"
+                                    title={`Move to ${nextColumn.name}`}
+                                  >
+                                    <ChevronRight className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {task.status !== 'done' && (
+                                  <button
+                                    onClick={() => handleCompleteTask(task.id)}
+                                    className="p-1 rounded hover:bg-green-100 dark:hover:bg-green-900/30 text-green-600 dark:text-green-400"
+                                    title="Mark as done"
+                                  >
+                                    <CheckCircle2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDeleteTask(task.id)}
+                                  className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {task.description && (
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 line-clamp-2 pl-4">
+                              {task.description}
+                            </p>
+                          )}
+
+                          <div className="flex items-center justify-between pl-4 pt-1">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                  priorityColors[task.priority]
+                                }`}
+                              >
+                                {task.priority}
+                              </span>
+
+                              {/* Stage selector dropdown — disabled for read-only viewers */}
+                              <select
+                                value={task.column_id}
+                                onChange={(e) => handleMoveTask(task.id, e.target.value)}
+                                disabled={!canEditTasks}
+                                className="text-[10px] font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 rounded px-1.5 py-0.5 outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {columns.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {task.profiles && (
+                              <div
+                                className="flex items-center gap-1.5"
+                                title={`Assigned to ${task.profiles.name}`}
+                              >
+                                <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-[10px]">
+                                  {task.profiles.name.charAt(0).toUpperCase()}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                      {columnTasks.length === 0 && (
+                        <p className="text-center text-gray-400 dark:text-gray-500 text-sm py-8">
+                          {isDragOver ? 'Drop task here' : 'No tasks yet'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+
+        {activeTab === 'jim' && project && (
+          <JimPanel
+            projectId={projectId}
+            projectName={project.name}
+            projectDescription={project.description || ''}
+            hasRepo={!!project.repo_url}
+            onDescriptionUpdate={handleDescriptionUpdate}
+            onTitleUpdate={handleTitleUpdate}
+          />
+        )}
+
+        {activeTab === 'michael' && project && (
+          <MichaelPanel
+            projectId={projectId}
+            projectName={project.name}
+            projectDescription={project.description || ''}
+            hasRepo={!!project.repo_url}
+            teamMembers={projectMembers.map((m) => ({
+              user_id: m.user_id,
+              name: m.profiles?.name ?? 'Unknown',
+            }))}
+            onTasksCreated={() => {
+              // Refresh the board so the new tasks appear immediately.
+              loadProjectData()
+            }}
+          />
+        )}
+      </div>
+
+      {/* New Task Modal */}
+      {showNewTaskModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
+              Create New Issue
+            </h2>
+
+            <form onSubmit={handleCreateTask} className="space-y-4">
+              <div>
+                <label
+                  htmlFor="title"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                >
+                  Issue Title *
+                </label>
+                <input
+                  id="title"
+                  type="text"
+                  value={newTaskTitle}
+                  onChange={(e) => setNewTaskTitle(e.target.value)}
+                  required
+                  placeholder="Implement user authentication"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="description"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                >
+                  Description (Optional)
+                </label>
+                <textarea
+                  id="description"
+                  value={newTaskDescription}
+                  onChange={(e) => setNewTaskDescription(e.target.value)}
+                  rows={3}
+                  placeholder="Add details about requirements, acceptance criteria..."
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 outline-none resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Priority
+                </label>
+                <div className="flex gap-2">
+                  {(['low', 'medium', 'high', 'urgent'] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setNewTaskPriority(p)}
+                      className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold capitalize transition-all ${
+                        newTaskPriority === p
+                          ? priorityColors[p] + ' ring-2 ring-purple-500'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="assignee"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                >
+                  Assign To (Optional)
+                </label>
+                <select
+                  id="assignee"
+                  value={selectedAssignee}
+                  onChange={(e) => setSelectedAssignee(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 outline-none"
+                >
+                  <option value="">Unassigned</option>
+                  {projectMembers.map((member) => (
+                    <option key={member.user_id} value={member.user_id}>
+                      {member.profiles.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Issues start in "To Do" - assignees can move them through stages
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewTaskModal(false)}
+                  className="flex-1 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    'Create Issue'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create GitHub Repo Modal */}
+      {showCreateRepoModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
+              Create GitHub Repository
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              This will create a new repo under your GitHub account and link it to this project.
+            </p>
+
+            {repoError && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl text-sm">
+                {repoError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateRepo} className="space-y-4">
+              <div>
+                <label
+                  htmlFor="repo-name"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                >
+                  Repository Name
+                </label>
+                <input
+                  id="repo-name"
+                  type="text"
+                  value={repoName}
+                  onChange={(e) => setRepoName(e.target.value)}
+                  required
+                  placeholder="my-awesome-project"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="repo-description"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                >
+                  Description
+                </label>
+                <textarea
+                  id="repo-description"
+                  value={repoDescription}
+                  onChange={(e) => setRepoDescription(e.target.value)}
+                  rows={2}
+                  placeholder="Short description of this project"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 outline-none resize-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  id="repo-private"
+                  type="checkbox"
+                  checked={repoPrivate}
+                  onChange={(e) => setRepoPrivate(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                />
+                <label
+                  htmlFor="repo-private"
+                  className="text-sm text-gray-700 dark:text-gray-300"
+                >
+                  Private repository
+                </label>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateRepoModal(false)
+                    setRepoError('')
+                  }}
+                  className="flex-1 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingRepo}
+                  className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {creatingRepo ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    'Create Repo'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

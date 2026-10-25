@@ -1,0 +1,265 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  /* Body, inputs, descriptions, small text */
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  /* Big hero headings only (Bebas Neue is condensed, not for body text) */
+  --font-display: var(--font-bebas-neue), system-ui, sans-serif;
+
+  /* --- Custom keyframes surfaced as Tailwind animation utilities --- */
+  --animate-shake: shake 0.3s ease-in-out;
+  --animate-slide-up: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-slide-down: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade-in: fadeIn 0.4s ease-out both;
+  --animate-scale-in: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-float-slow: float 9s ease-in-out infinite;
+  --animate-pulse-glow: pulseGlow 2.2s ease-in-out infinite;
+  --animate-shimmer: shimmer 2.5s linear infinite;
+  --animate-gradient-x: gradientX 8s ease infinite;
+  --animate-gradient-y: gradient-y 6s ease infinite;
+  --animate-bar-fill: barFill 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-spin-slow: spin 8s linear infinite;
+  --animate-blink: blink 1.4s ease-in-out infinite;
+  --animate-pop: pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-bounce-soft: bounceSoft 2.6s ease-in-out infinite;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Bebas Neue is reserved for prominent hero headings — h1 and h2.
+   Sub-headings (h3, h4, h5, h6), body text, inputs, and descriptions
+   stay on Geist for legibility at small sizes. */
+h1, h2 {
+  font-family: var(--font-display);
+  letter-spacing: 0.005em;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+/* --- Entry animations --- */
+@keyframes slideUp {
+  0%   { opacity: 0; transform: translateY(16px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideDown {
+  0%   { opacity: 0; transform: translateY(-12px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes scaleIn {
+  0%   { opacity: 0; transform: scale(0.92); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes pop {
+  0%   { opacity: 0; transform: scale(0.85); }
+  60%  { opacity: 1; transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+/* --- Idle / looping animations --- */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 rgba(168, 85, 247, 0.35),
+      0 0 0 0 rgba(236, 72, 153, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 0 0 8px rgba(168, 85, 247, 0),
+      0 0 24px 4px rgba(236, 72, 153, 0.35);
+  }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes gradientX {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+@keyframes gradient-y {
+  0%, 100% { background-position: 50% 0%; }
+  50%      { background-position: 50% 100%; }
+}
+@keyframes barFill {
+  0%   { transform: scaleX(0); transform-origin: left; }
+  100% { transform: scaleX(1); transform-origin: left; }
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+@keyframes bounceSoft {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+
+/* --- Helper utility classes exposed for the dashboard / kanban --- */
+@layer utilities {
+  /* Staggered entry for groups of cards. Wrap the parent in
+     `.stagger-children` and each child gets the slide-up animation with
+     a tiny delay based on its index (set --i inline or via :nth-child). */
+  .stagger-children > * {
+    animation: var(--animate-slide-up);
+    animation-delay: calc(var(--i, 0) * 55ms);
+  }
+
+  /* Animated gradient background — used on hero cards & priority pills. */
+  .bg-aurora {
+    background: linear-gradient(
+      120deg,
+      #a855f7 0%,
+      #ec4899 35%,
+      #f97316 70%,
+      #a855f7 100%
+    );
+    background-size: 300% 300%;
+    animation: gradientX 12s ease infinite;
+  }
+  .bg-aurora-cool {
+    background: linear-gradient(
+      120deg,
+      #06b6d4 0%,
+      #3b82f6 40%,
+      #8b5cf6 80%,
+      #06b6d4 100%
+    );
+    background-size: 300% 300%;
+    animation: gradientX 10s ease infinite;
+  }
+  .bg-aurora-warm {
+    background: linear-gradient(
+      120deg,
+      #f59e0b 0%,
+      #ef4444 45%,
+      #ec4899 100%
+    );
+    background-size: 300% 300%;
+    animation: gradientX 9s ease infinite;
+  }
+
+  /* Shimmer text used inside priority / status pills. */
+  .text-shimmer {
+    background: linear-gradient(
+      90deg,
+      currentColor 0%,
+      rgba(255, 255, 255, 0.55) 50%,
+      currentColor 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer 2.4s linear infinite;
+  }
+
+  /* Conic glow halo used on hover for project / issue cards. */
+  .ring-aurora {
+    position: relative;
+    isolation: isolate;
+  }
+  .ring-aurora::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      120deg,
+      rgba(168, 85, 247, 0.7),
+      rgba(236, 72, 153, 0.7),
+      rgba(56, 189, 248, 0.7),
+      rgba(168, 85, 247, 0.7)
+    );
+    background-size: 300% 300%;
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+    animation: gradientX 8s ease infinite;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .ring-aurora:hover::before,
+  .ring-aurora:focus-within::before {
+    opacity: 1;
+  }
+
+  /* Soft inner glow used on the kanban drop target. */
+  .drop-glow {
+    animation: pulseGlow 1.8s ease-in-out infinite;
+  }
+
+  /* Capacity bar fill — smoothly animates the width on mount. */
+  .bar-fill {
+    animation: barFill 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Subtle hover lift used everywhere. */
+  .lift {
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.35s ease;
+    will-change: transform;
+  }
+  .lift:hover {
+    transform: translateY(-4px);
+  }
+
+  /* Stronger lift + tilt for hero cards. */
+  .lift-strong:hover {
+    transform: translateY(-8px) rotate(-0.3deg);
+  }
+
+  /* Respect users who prefer reduced motion — disable the fancy stuff. */
+  @media (prefers-reduced-motion: reduce) {
+    .stagger-children > *,
+    .lift,
+    .lift-strong,
+    .ring-aurora,
+    .ring-aurora::before,
+    .bg-aurora,
+    .bg-aurora-cool,
+    .bg-aurora-warm,
+    .text-shimmer,
+    .drop-glow,
+    .bar-fill,
+    [class*="animate-"] {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}

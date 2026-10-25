@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DAVE Supabase Database Diagnostics</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .animate-pulse-slow {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-8">
+  <div class="max-w-4xl mx-auto">
+    <div class="bg-white rounded-2xl shadow-xl p-8 mb-8 border border-gray-100">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-3xl font-bold text-gray-900 mb-2">DAVE Database Diagnostics</h1>
+          <p class="text-gray-600">Checking your Supabase database tables, RLS policies, and triggers</p>
+        </div>
+        <button id="runDiagnostics" class="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold rounded-xl shadow-lg transition-all flex items-center gap-2">
+          <span>Run Diagnostics</span>
+        </button>
+      </div>
+
+      <div class="space-y-4">
+        <div class="p-4 bg-gray-50 rounded-xl">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-medium text-gray-700">Supabase URL:</span>
+            <span id="supabaseUrl" class="font-mono text-sm text-gray-600">Loading...</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="font-medium text-gray-700">Connection Status:</span>
+            <span id="connectionStatus" class="font-medium text-sm text-gray-500">Not checked</span>
+          </div>
+        </div>
+
+        <div class="border-t border-gray-200 pt-4">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">Table Status Checks</h2>
+          <div id="tableChecks" class="space-y-3">
+            <div class="text-center py-8 text-gray-500">Click "Run Diagnostics" to check your database tables</div>
+          </div>
+        </div>
+
+        <div class="border-t border-gray-200 pt-4">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">RLS Policy Checks</h2>
+          <div id="rlsChecks" class="space-y-3">
+            <div class="text-center py-8 text-gray-500">Click "Run Diagnostics" to check RLS policies</div>
+          </div>
+        </div>
+
+        <div class="border-t border-gray-200 pt-4">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">Trigger & Function Checks</h2>
+          <div id="triggerChecks" class="space-y-3">
+            <div class="text-center py-8 text-gray-500">Click "Run Diagnostics" to check triggers</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-blue-50 border border-blue-200 rounded-2xl p-6 text-sm text-blue-800">
+      <h3 class="font-semibold mb-2">How to Fix the RLS Policy Error:</h3>
+      <ol class="list-decimal list-inside space-y-1">
+        <li>Open your Supabase Dashboard: <a href="https://supabase.com/dashboard" target="_blank" class="underline font-medium">supabase.com/dashboard</a></li>
+        <li>Select your project (vugzkbjuhuxyalxdyorm)</li>
+        <li>Click "SQL Editor" in the left sidebar</li>
+        <li>Create a "New Query"</li>
+        <li>Copy and paste the entire contents of <code>supabase/migrations/20261003000000_initial_schema.sql</code></li>
+        <li>Click "Run"</li>
+      </ol>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://vugzkbjuhuxyalxdyorm.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1Z3prYmp1aHV4eWFseGR5b3JtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEwMjMyMjYsImV4cCI6MjEwNjU5OTIyNn0.4cLpz_P-YFBDxo2gBVj2QtXC4JWrJtG_0HU717b6OC4';
+
+    document.getElementById('supabaseUrl').textContent = SUPABASE_URL;
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const TABLES_TO_CHECK = [
+      'profiles',
+      'teams',
+      'team_members',
+      'projects',
+      'project_members',
+      'boards',
+      'columns',
+      'tasks',
+      'labels',
+      'task_labels',
+      'task_comments',
+      'workflows',
+      'workflow_stages',
+      'approval_requests',
+      'notifications'
+    ];
+
+    document.getElementById('runDiagnostics').addEventListener('click', async () => {
+      const button = document.getElementById('runDiagnostics');
+      button.disabled = true;
+      button.innerHTML = '<span class="animate-spin">⏳</span> Running...';
+
+      const connectionStatus = document.getElementById('connectionStatus');
+      connectionStatus.textContent = 'Testing connection...';
+      connectionStatus.className = 'font-medium text-sm text-yellow-600';
+
+      const tableChecks = document.getElementById('tableChecks');
+      tableChecks.innerHTML = '<div class="text-center py-4 text-gray-500">Checking tables...</div>';
+
+      const rlsChecks = document.getElementById('rlsChecks');
+      rlsChecks.innerHTML = '<div class="text-center py-4 text-gray-500">Checking RLS...</div>';
+
+      const triggerChecks = document.getElementById('triggerChecks');
+      triggerChecks.innerHTML = '<div class="text-center py-4 text-gray-500">Checking triggers...</div>';
+
+      try {
+        // Test basic connection
+        const { data, error } = await supabase.from('profiles').select('count', { count: 'exact', head: true });
+
+        if (error) {
+          connectionStatus.textContent = 'Connected (with RLS/table restrictions)';
+          connectionStatus.className = 'font-medium text-sm text-blue-600';
+        } else {
+          connectionStatus.textContent = 'Connected successfully!';
+          connectionStatus.className = 'font-medium text-sm text-green-600';
+        }
+
+        // Check each table
+        let tableHtml = '';
+        let rlsHtml = '';
+
+        for (const table of TABLES_TO_CHECK) {
+          try {
+            const { error: selectError } = await supabase.from(table).select('*').limit(1);
+
+            if (selectError) {
+              if (selectError.code === '42P01') {
+                // Table doesn't exist
+                tableHtml += `
+                  <div class="flex items-center justify-between p-3 bg-red-50 rounded-xl border border-red-200">
+                    <span class="font-mono text-sm font-medium text-red-900">${table}</span>
+                    <span class="text-xs font-semibold px-2 py-1 bg-red-100 text-red-700 rounded-full">Missing Table</span>
+                  </div>
+                `;
+              } else if (selectError.code === 'PGRST301' || selectError.message?.includes('violates row-level security')) {
+                // Table exists, RLS is active
+                tableHtml += `
+                  <div class="flex items-center justify-between p-3 bg-green-50 rounded-xl border border-green-200">
+                    <span class="font-mono text-sm font-medium text-green-900">${table}</span>
+                    <span class="text-xs font-semibold px-2 py-1 bg-green-100 text-green-700 rounded-full">Exists (RLS Active)</span>
+                  </div>
+                `;
+                rlsHtml += `
+                  <div class="flex items-center justify-between p-3 bg-green-50 rounded-xl border border-green-200">
+                    <span class="font-mono text-sm font-medium text-green-900">${table} RLS</span>
+                    <span class="text-xs font-semibold px-2 py-1 bg-green-100 text-green-700 rounded-full">Enabled</span>
+                  </div>
+                `;
+              } else {
+                tableHtml += `
+                  <div class="flex items-center justify-between p-3 bg-yellow-50 rounded-xl border border-yellow-200">
+                    <span class="font-mono text-sm font-medium text-yellow-900">${table}</span>
+                    <span class="text-xs font-semibold px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full">Error: ${selectError.message}</span>
+                  </div>
+                `;
+              }
+            } else {
+              tableHtml += `
+                <div class="flex items-center justify-between p-3 bg-green-50 rounded-xl border border-green-200">
+                  <span class="font-mono text-sm font-medium text-green-900">${table}</span>
+                  <span class="text-xs font-semibold px-2 py-1 bg-green-100 text-green-700 rounded-full">Exists & Accessible</span>
+                </div>
+              `;
+            }
+          } catch (err) {
+            tableHtml += `
+              <div class="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-200">
+                <span class="font-mono text-sm font-medium text-gray-900">${table}</span>
+                <span class="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-700 rounded-full">Check Failed</span>
+              </div>
+            `;
+          }
+        }
+
+        tableChecks.innerHTML = tableHtml || '<div class="text-center py-4 text-gray-500">No tables checked</div>';
+        rlsChecks.innerHTML = rlsHtml || '<div class="text-center py-4 text-gray-500">Could not determine RLS policies</div>';
+
+        // Check for specific trigger issue
+        triggerChecks.innerHTML = `
+          <div class="p-4 bg-amber-50 rounded-xl border border-amber-200">
+            <h4 class="font-semibold text-amber-900 mb-2">The Cause of Your Error:</h4>
+            <p class="text-sm text-amber-800 mb-3">
+              The <code>new row violates row-level security policy for table "teams"</code> error occurs when:
+            </p>
+            <ul class="list-disc list-inside text-sm text-amber-800 space-y-1 mb-4">
+              <li>You try to create a team, but the <code>handle_new_team()</code> trigger is missing</li>
+              <li>The trigger should automatically add you to <code>team_members</code> with <code>security definer</code> privileges</li>
+              <li>Without the trigger, inserting into <code>team_members</code> fails because the RLS policy requires an existing owner</li>
+            </ul>
+            <div class="bg-white p-3 rounded-lg border border-amber-300">
+              <span class="font-semibold text-xs text-amber-900 uppercase tracking-wider block mb-1">Fix:</span>
+              <p class="text-xs text-amber-800 font-mono">
+                Run the migration file in your Supabase SQL Editor to create the tables, triggers, and functions.
+              </p>
+            </div>
+          </div>
+        `;
+
+      } catch (err) {
+        connectionStatus.textContent = 'Connection failed: ' + err.message;
+        connectionStatus.className = 'font-medium text-sm text-red-600';
+      } finally {
+        button.disabled = false;
+        button.innerHTML = '<span>Run Diagnostics</span>';
+      }
+    });
+  </script>
+</body>
+</html>
