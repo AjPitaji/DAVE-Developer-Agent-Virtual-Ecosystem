@@ -29,7 +29,7 @@ Build mode: fast
   Learner check: Ask Michael to plan tasks for a project and check that proposed tasks name actual files from the repo.
   Commit: `Verify Michael AI task planner`
 
-- [ ] **3. Jim creates a branch and PR**
+- [x] **3. Jim creates a branch and PR**
   Becomes usable: Jim creates a dedicated branch and raises a PR via GitHub API; branch name and PR link stored on the task.
   Why now: Branch/PR creation is the developer-agent kernel — proves code can be pushed programmatically.
   PRD ref: `prd.md > AI Teammate Task Execution`
