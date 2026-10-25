@@ -19,7 +19,7 @@ Build mode: fast
   Learner check: Open the app, log in, create a project, and confirm the Kanban board appears.
   Commit: `Verify app boots and core journey runs`
 
-- [ ] **2. Michael plans tasks from the GitHub repo**
+- [x] **2. Michael plans tasks from the GitHub repo**
   Becomes usable: Michael reads the linked repo's file tree and proposes tasks grounded in real file paths.
   Why now: AI task planning is the unique kernel — proves the agent can reason over real repo data.
   PRD ref: `prd.md > AI Task Planner (Michael)`
