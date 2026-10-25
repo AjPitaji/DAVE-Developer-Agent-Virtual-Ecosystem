@@ -39,7 +39,7 @@ Build mode: fast
   Learner check: Trigger Jim on a task and confirm the branch name and PR link appear on the task card.
   Commit: `Verify Jim branch and PR creation`
 
-- [ ] **4. Pam searches public GitHub**
+- [x] **4. Pam searches public GitHub**
   Becomes usable: Pam turns a question into GitHub search queries and returns relevant public repos with one-line relevance.
   Why now: Prior-art search is a standalone feature that proves external API integration.
   PRD ref: `prd.md > Pam — Prior Art Search`
@@ -49,7 +49,7 @@ Build mode: fast
   Learner check: Ask Pam "has anyone built a kanban board?" and confirm real repos appear with relevance explanations.
   Commit: `Verify Pam prior art search`
 
-- [ ] **5. Dwight reviews committed PR code**
+- [x] **5. Dwight reviews committed PR code**
   Becomes usable: Dwight reviews the PR linked to a task (by display ID or PR URL) and produces a structured review report.
   Why now: Reviewer agent is the QA kernel — proves code review can be automated.
   PRD ref: `prd.md > Reviewer Agent Progression Testing`
@@ -59,7 +59,7 @@ Build mode: fast
   Learner check: Trigger Dwight on a completed task and confirm the review report displays test results and feedback.
   Commit: `Verify Dwight PR code review`
 
-- [ ] **6. Kanban board interactions work**
+- [x] **6. Kanban board interactions work**
   Becomes usable: Tasks can be moved between Ready/In Progress/Blocked/Done columns; cards show title, assignee, stage.
   Why now: The board is the central workspace UI — must work for the demo.
   PRD ref: `prd.md > 4-Stage Kanban Board`
