@@ -43,10 +43,12 @@ export async function POST(
     if (!taskId) {
       return NextResponse.json({ error: 'taskId is required' }, { status: 400 });
     }
-    const returnTo =
-      typeof body?.returnTo === 'string' && body.returnTo.startsWith('/')
-        ? body.returnTo
-        : `/projects/${projectId}`;
+  const returnTo =
+    typeof body?.returnTo === 'string' && body.returnTo.startsWith('/')
+      ? body.returnTo
+      : `/projects/${projectId}`;
+  const additionalPrompt =
+    typeof body?.additionalPrompt === 'string' ? body.additionalPrompt : null;
 
     // ---- load project + check access --------------------------------------
     const { data: project, error: projectError } = await supabase
@@ -173,6 +175,7 @@ export async function POST(
       prNumber,
       githubToken: profile.github_token,
       returnTo,
+      additionalPrompt,
     });
 
     if (!result.ok) {

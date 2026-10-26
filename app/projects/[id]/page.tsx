@@ -346,23 +346,19 @@ export default function ProjectDetailPage() {
       const hasDeadline = deadline !== null
       const deadlinePassed = hasDeadline && new Date(deadline!) < new Date()
 
-      // Tasks counts via column -> board join
-      const { data: tasksData } = await supabase
-        .from('tasks')
-        .select('assignee_id')
-        .in(
-          'column_id',
-          supabase
-            .from('columns')
-            .select('id')
-            .in(
-              'board_id',
-              supabase
-                .from('boards')
-                .select('id')
-                .eq('project_id', projectId)
-            )
-        )
+       // Tasks counts via column -> board join
+       const { data: boardsData } = await supabase
+         .from('boards')
+         .select('id')
+         .eq('project_id', projectId)
+       const boardIds = (boardsData as { id: string }[] | null)?.map((b) => b.id) || []
+       const { data: columnsData } = boardIds.length
+         ? await supabase.from('columns').select('id').in('board_id', boardIds)
+         : { data: [] as { id: string }[] }
+       const columnIds = (columnsData as { id: string }[] | null)?.map((c) => c.id) || []
+       const { data: tasksData } = columnIds.length
+         ? await supabase.from('tasks').select('assignee_id').in('column_id', columnIds)
+         : { data: [] as { assignee_id: string | null }[] }
 
       const tasks = (tasksData as { assignee_id: string | null }[] | null) || []
       const totalTasks = tasks.length

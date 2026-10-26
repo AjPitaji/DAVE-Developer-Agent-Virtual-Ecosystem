@@ -69,6 +69,8 @@ export async function POST(
       typeof body?.returnTo === 'string' && body.returnTo.startsWith('/')
         ? body.returnTo
         : `/projects/${projectId}`;
+    const additionalPrompt =
+      typeof body?.additionalPrompt === 'string' ? body.additionalPrompt : null;
 
     // ---- load project (need repo_url + access) -----------------------------
     const { data: project, error: projectError } = await supabase
@@ -280,6 +282,7 @@ export async function POST(
         prNumber: linkedPrNumber,
         githubToken: profile.github_token,
         returnTo,
+        additionalPrompt,
       });
       if (!result.ok) {
         // Surface the reauth payload (if any) so the UI can render the
@@ -527,10 +530,11 @@ export async function POST(
       projectDescription: project.description || '',
       taskId,
       taskTitle: task.title,
-      taskDescription: task.description,
-      repoUrl: project.repo_url,
-      githubToken: profile.github_token,
-    };
+       taskDescription: task.description,
+       repoUrl: project.repo_url,
+       githubToken: profile.github_token,
+       additionalPrompt,
+     };
 
     let review;
     try {

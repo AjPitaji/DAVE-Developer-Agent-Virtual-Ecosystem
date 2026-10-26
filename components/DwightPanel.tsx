@@ -311,7 +311,7 @@ export function DwightPanel({
   // reviews the PR diff instead of the default-branch HEAD.
   // -------------------------------------------------------------------------
   const triggerReview = useCallback(
-    async (target: ReviewTarget) => {
+    async (target: ReviewTarget, additionalPrompt?: string) => {
       if (!hasRepo) return;
       setRunningTaskId(target.taskId);
       setRunningError('');
@@ -319,9 +319,9 @@ export function DwightPanel({
         const endpoint = target.prNumber
           ? `/api/dwight/${projectId}/review-pr`
           : `/api/dwight/${projectId}/review`;
-        const body = target.prNumber
-          ? { taskId: target.taskId, prNumber: target.prNumber }
-          : { taskId: target.taskId };
+         const body = target.prNumber
+           ? { taskId: target.taskId, prNumber: target.prNumber, additionalPrompt }
+           : { taskId: target.taskId, additionalPrompt };
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -417,14 +417,14 @@ export function DwightPanel({
   // Manual re-run on the currently selected review (re-runs against the
   // current latest commit on the default branch).
   // -------------------------------------------------------------------------
-  async function handleRerun() {
-    const target = reviews.find((r) => r.id === selectedId);
-    if (!target) return;
-    await triggerReview({
-      taskId: target.task_id,
-      prNumber: target.pr_number,
-    });
-  }
+   async function handleRerun(additionalPrompt?: string) {
+     const target = reviews.find((r) => r.id === selectedId);
+     if (!target) return;
+     await triggerReview({
+       taskId: target.task_id,
+       prNumber: target.pr_number,
+     }, additionalPrompt);
+   }
 
   // Mark the currently-selected review as `failed` so the user can
   // escape a stuck run. The task itself stays in `under_review` — they
@@ -711,12 +711,13 @@ function ReviewDetail({
 }: {
   review: Review;
   isRunning: boolean;
-  onRerun: () => void;
+  onRerun: (additionalPrompt?: string) => void;
   onCancel: () => void;
   cancelling: boolean;
 }) {
   const meta = VERDICT_META[review.verdict] ?? VERDICT_META.comment;
   const Icon = meta.icon;
+  const [rerunPrompt, setRerunPrompt] = useState('');
 
   return (
     <div className="space-y-4">
@@ -883,11 +884,20 @@ function ReviewDetail({
         />
       )}
 
-      {/* Actions */}
-      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-        <button
-          onClick={onRerun}
-          disabled={isRunning}
+       {/* Actions */}
+       <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+         {review.verdict === 'changes_requested' && (
+           <textarea
+             value={rerunPrompt}
+             onChange={(e) => setRerunPrompt(e.target.value)}
+             placeholder="Explain what you've done to address Dwight's feedback..."
+             className="w-full mb-2 p-2 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+             rows={3}
+           />
+         )}
+         <button
+           onClick={() => onRerun(rerunPrompt)}
+           disabled={isRunning}
           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white text-xs font-semibold shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           title="Re-run Dwight against the latest commit on the default branch"
         >

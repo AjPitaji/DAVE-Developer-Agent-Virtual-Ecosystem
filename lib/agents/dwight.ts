@@ -32,6 +32,7 @@ export interface DwightContext {
   taskDescription: string | null;
   repoUrl: string;
   githubToken: string;
+  additionalPrompt?: string | null;
 }
 
 export interface DwightReview {
@@ -481,6 +482,7 @@ Project description: ${ctx.projectDescription || '(none)'}
 Task marked done:
 - Title: ${ctx.taskTitle}
 - Description: ${ctx.taskDescription || '(none)'}
+${ctx.additionalPrompt?.trim() ? `\nAdditional context from the developer (what they did to address prior feedback):\n${ctx.additionalPrompt.trim()}\n` : ''}
 
 Repo: ${ctx.repoUrl}
 ${sourceHeader}
@@ -678,8 +680,12 @@ export function pickVerdictColumn(
     });
     return { status: 'in_progress', columnId: fallback?.id ?? currentColumnId };
   }
-  // approved or comment: task is done, keep the column the user dropped it in.
-  return { status: 'done', columnId: currentColumnId };
+  // approved or comment: task is done, move to a "done"-named column if one exists.
+  const doneColumn = columns.find((c) => {
+    const k = c.name.toLowerCase();
+    return k.includes('done') || k.includes('closed') || k.includes('complete');
+  });
+  return { status: 'done', columnId: doneColumn?.id ?? currentColumnId };
 }
 
 export function buildVerdictMessage(
@@ -994,6 +1000,7 @@ export interface DwightPrReviewInput {
    * defaults to `/settings` when not provided.
    */
   readonly returnTo?: string;
+  readonly additionalPrompt?: string | null;
   /**
    * When the caller has already opened a review row (e.g. to log the
    * "Searching for pull request" step), it threads that handle through
@@ -1167,6 +1174,7 @@ export async function runDwightPrReview(
 ): Promise<DwightPrReviewResult> {
   const { supabase, userId, project, task, projectColumns, prNumber, githubToken, returnTo } =
     input;
+  const additionalPrompt = input.additionalPrompt;
   const existingRun = input.existingRun;
 
   // ---- 1. Create (or adopt) a pending review row -------------------------
@@ -1341,6 +1349,7 @@ export async function runDwightPrReview(
     taskDescription: task.description,
     repoUrl: project.repo_url,
     githubToken,
+    additionalPrompt,
   };
 
   let review;
