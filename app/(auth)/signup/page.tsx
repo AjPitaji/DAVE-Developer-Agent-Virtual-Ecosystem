@@ -15,6 +15,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [emailConfirmation, setEmailConfirmation] = useState(false)
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -46,7 +47,16 @@ export default function SignupPage() {
         return
       }
 
+      // If no session, email confirmation is required
+      if (!data?.session) {
+        setSuccess(true)
+        setEmailConfirmation(true)
+        setError('')
+        return
+      }
+
       setSuccess(true)
+      setEmailConfirmation(false)
 
       // Wait a moment then redirect
       setTimeout(() => {
@@ -61,6 +71,29 @@ export default function SignupPage() {
   }
 
   if (success) {
+    if (emailConfirmation) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 dark:from-gray-900 dark:via-purple-900/20 dark:to-blue-900/20 p-4">
+          <div className="w-full max-w-md">
+            <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl p-8 border border-gray-100 dark:border-gray-700 text-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-full mb-4">
+                <CheckCircle2 className="w-8 h-8 text-white" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                Check your email 📧
+              </h2>
+              <p className="text-gray-600 dark:text-gray-400 mb-4">
+                We've sent a confirmation link to <strong>{email}</strong>. Click the link to verify your account, then log in.
+              </p>
+              <Link href="/login" className="text-purple-600 dark:text-purple-400 font-semibold hover:underline">
+                Go to Login
+              </Link>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 dark:from-gray-900 dark:via-purple-900/20 dark:to-blue-900/20 p-4">
         <div className="w-full max-w-md">
