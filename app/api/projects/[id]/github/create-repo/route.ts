@@ -188,6 +188,45 @@ export async function POST(
 
     const repo = await githubRes.json()
     const repoUrl = repo.html_url || repo.url
+    const repoFullName = repo.full_name // owner/repo
+
+    // Grant read/write (push) access to all team members with a GitHub username
+    try {
+      // Get team members
+      const { data: teamMembers } = await supabase
+        .from('team_members')
+        .select('user_id')
+        .eq('team_id', project.team_id)
+
+      if (teamMembers && teamMembers.length > 0) {
+        const memberIds = teamMembers.map((m: { user_id: string }) => m.user_id)
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('github_username')
+          .in('id', memberIds)
+
+        const usernames = (profiles || [])
+          .map((p: { github_username: string | null }) => p.github_username)
+          .filter((u: string | null): u is string => !!u)
+
+        // Add each as a collaborator with push access
+        for (const username of usernames) {
+          // Don't try to add the repo owner
+          if (username.toLowerCase() === repo.owner?.login?.toLowerCase()) continue
+          await fetch(`https://api.github.com/repos/${repoFullName}/collaborators/${username}`, {
+            method: 'PUT',
+            headers: {
+              ...githubAuthHeaders(token),
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ permission: 'push' }),
+          })
+        }
+      }
+    } catch (collabErr) {
+      console.error('Failed to add team members as collaborators:', collabErr)
+      // Non-fatal: repo was still created successfully
+    }
 
     const { error: updateError } = await supabase
       .from('projects')
