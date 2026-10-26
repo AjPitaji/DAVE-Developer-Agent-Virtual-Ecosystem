@@ -118,6 +118,62 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
   const [togglingPublic, setTogglingPublic] = useState(false)
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([])
   const [decidingRequestId, setDecidingRequestId] = useState<string | null>(null)
+  const [leaving, setLeaving] = useState(false)
+
+  const handleLeaveTeam = async () => {
+    if (!currentUserId || isTeamOwner) return
+    // Check for open tasks assigned to this user across projects in this team
+    try {
+      const { data: projects } = await supabase
+        .from('projects')
+        .select('id')
+        .eq('team_id', id)
+      if (projects && projects.length > 0) {
+        const projectIds = projects.map((p: { id: string }) => p.id)
+        const { data: boards } = await supabase
+          .from('boards')
+          .select('id')
+          .in('project_id', projectIds)
+        if (boards && boards.length > 0) {
+          const boardIds = boards.map((b: { id: string }) => b.id)
+          const { data: cols } = await supabase
+            .from('columns')
+            .select('id')
+            .in('board_id', boardIds)
+          if (cols && cols.length > 0) {
+            const colIds = cols.map((c: { id: string }) => c.id)
+            const { data: openTasks } = await supabase
+              .from('tasks')
+              .select('id')
+              .in('column_id', colIds)
+              .eq('assignee_id', currentUserId)
+              .neq('status', 'done')
+            if (openTasks && openTasks.length > 0) {
+              setError('You have open tasks assigned to you. Complete or reassign them before leaving the team.')
+              return
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // If check fails, allow leave anyway
+    }
+    if (!confirm('Leave this team?')) return
+    setLeaving(true)
+    try {
+      const { error } = await supabase
+        .from('team_members')
+        .delete()
+        .eq('team_id', id)
+        .eq('user_id', currentUserId)
+      if (error) throw error
+      router.push('/dashboard')
+    } catch (err: any) {
+      setError(err.message || 'Failed to leave team')
+    } finally {
+      setLeaving(false)
+    }
+  }
 
   useEffect(() => {
     loadTeamData()
@@ -488,14 +544,25 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
             )}
           </div>
 
-          {/* Owner helper text */}
-          {showOwnerControls && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 px-1">
-              {team?.is_public
-                ? '🌐 This team appears in the public Discover page. Developers can send join requests that you approve below.'
-                : 'Make this team public to let developers discover and request to join it.'}
-            </p>
-          )}
+            {/* Leave Team button for non-owners */}
+            {!showOwnerControls && (
+              <button
+                onClick={handleLeaveTeam}
+                disabled={leaving}
+                className="shrink-0 flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all disabled:opacity-50"
+              >
+                {leaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {leaving ? 'Leaving...' : 'Leave Team'}
+              </button>
+            )}
+            {/* Owner helper text */}
+            {showOwnerControls && (
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 px-1">
+                {team?.is_public
+                  ? '🌐 This team appears in the public Discover page. Developers can send join requests that you approve below.'
+                  : 'Make this team public to let developers discover and request to join it.'}
+              </p>
+            )}
         </div>
 
         {/* Pending Join Requests (owner only) */}

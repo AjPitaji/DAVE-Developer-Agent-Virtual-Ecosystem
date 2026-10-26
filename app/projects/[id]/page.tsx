@@ -199,6 +199,9 @@ export default function ProjectDetailPage() {
 
   // Drag and Drop State
   const [draggedTask, setDraggedTask] = useState<Task | null>(null)
+  const [showProjectActions, setShowProjectActions] = useState(false)
+  const [finishing, setFinishing] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
 
   // New Task/Issue Modal State
@@ -414,6 +417,54 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function handleFinishProject() {
+    if (!project || !isProjectOwner) return
+    if (!confirm('Mark this project as finished? It will be archived.')) return
+    setFinishing(true)
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .update({ status: 'archived' })
+        .eq('id', project.id)
+      if (error) throw error
+      setProject((prev) => (prev ? { ...prev, status: 'archived' } : prev))
+    } catch (err: any) {
+      alert(err.message || 'Failed to finish project')
+    } finally {
+      setFinishing(false)
+    }
+  }
+
+  async function handleDeleteProject() {
+    if (!project || !isProjectOwner) return
+    if (!confirm('Delete this project and all its tasks? This cannot be undone.')) return
+    setDeleting(true)
+    try {
+      const { data: boardData } = await supabase
+        .from('boards')
+        .select('id')
+        .eq('project_id', project.id)
+        .single()
+      if (boardData) {
+        const { data: cols } = await supabase
+          .from('columns')
+          .select('id')
+          .eq('board_id', boardData.id)
+        if (cols && cols.length > 0) {
+          const colIds = cols.map((c: { id: string }) => c.id)
+          await supabase.from('tasks').delete().in('column_id', colIds)
+          await supabase.from('columns').delete().eq('board_id', boardData.id)
+        }
+        await supabase.from('boards').delete().eq('id', boardData.id)
+      }
+      await supabase.from('projects').delete().eq('id', project.id)
+      router.push('/dashboard')
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete project')
+    } finally {
+      setDeleting(false)
+    }
+  }
   function beginEditDeadline() {
     if (!project) return
     // Pre-fill the date input from either the existing deadline or today.
@@ -1404,6 +1455,34 @@ export default function ProjectDetailPage() {
                     )}
                     {project.status === 'on_hold' ? 'On Hold' : project.status}
                   </span>
+                  {isProjectOwner && (
+                    <div className="relative inline-block">
+                      <button
+                        onClick={() => setShowProjectActions(!showProjectActions)}
+                        className="px-3 py-1 text-xs font-semibold rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                      >
+                        ⋯ Actions
+                      </button>
+                      {showProjectActions && (
+                        <div className="absolute right-0 top-8 z-10 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 py-1 min-w-[160px]">
+                          <button
+                            onClick={() => { handleFinishProject(); setShowProjectActions(false) }}
+                            disabled={finishing || project.status === 'archived'}
+                            className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                          >
+                            {finishing ? 'Finishing...' : 'Finish Project'}
+                          </button>
+                          <button
+                            onClick={() => { handleDeleteProject(); setShowProjectActions(false) }}
+                            disabled={deleting}
+                            className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                          >
+                            {deleting ? 'Deleting...' : 'Delete Project'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {deadlineDate && (
                     <span
                       title={deadlineDate.toLocaleString()}
